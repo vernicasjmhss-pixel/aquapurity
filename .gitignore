@@ -1,0 +1,7 @@
+# Python bytecode / virtualenvs — nothing else is excluded so a fresh clone
+# can run the demo immediately (data/ CSVs, trained models and metrics are small
+# and deterministic, so they are committed on purpose).
+__pycache__/
+*.py[cod]
+.venv/
+venv/

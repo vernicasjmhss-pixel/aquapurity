@@ -1,0 +1,696 @@
+<!DOCTYPE html>
+<!--
+  app/index.html
+  ==============
+  Aquapurity – Explainable Spatiotemporal GNN Dashboard
+
+  ⚠️  ALL DATA IS SYNTHETIC – for demonstration / college project purposes only.
+      No real groundwater data is shown. Results illustrate the pipeline.
+
+  Libraries bundled locally in app/vendor/ (no CDN, no internet at runtime):
+    Leaflet 1.9.4  – interactive GIS map
+    Chart.js 4.4   – bar and line charts
+  The basemap is drawn offline as vector graticule + district outlines,
+  so the dashboard works with the network cable unplugged.
+
+  The page talks to the FastAPI backend at http://127.0.0.1:8000
+-->
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Aquapurity – Groundwater Recharge Prioritisation</title>
+
+  <!-- ── Leaflet CSS, served from the local app/vendor folder ──────────────── -->
+  <link rel="stylesheet" href="vendor/leaflet.css" />
+
+  <style>
+    /* ── Design tokens ─────────────────────────────────────────────────── */
+    :root {
+      --bg:       #0d1117;
+      --surface:  #161b22;
+      --border:   #30363d;
+      --accent:   #58a6ff;
+      --good:     #3fb950;
+      --warn:     #d29922;
+      --bad:      #f85149;
+      --text:     #e6edf3;
+      --muted:    #8b949e;
+      --radius:   8px;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      height: 100vh;
+      display: grid;
+      grid-template-rows: 52px 1fr;
+      grid-template-columns: 320px 1fr 320px;
+      overflow: hidden;
+    }
+
+    /* ── Top bar ────────────────────────────────────────────────────────── */
+    header {
+      grid-column: 1 / -1;
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 0 16px;
+    }
+    header h1 { font-size: 1rem; font-weight: 700; color: var(--accent); }
+    header p  { font-size: 0.78rem; color: var(--muted); }
+
+    .badge-synthetic {
+      margin-left: auto;
+      background: #3d1f00;
+      border: 1px solid var(--warn);
+      color: var(--warn);
+      font-size: 0.72rem;
+      font-weight: 700;
+      padding: 3px 10px;
+      border-radius: 20px;
+      letter-spacing: 0.04em;
+      white-space: nowrap;
+    }
+
+    /* ── Left panel ─────────────────────────────────────────────────────── */
+    #left-panel {
+      background: var(--surface);
+      border-right: 1px solid var(--border);
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    .panel-section {
+      padding: 12px;
+      border-bottom: 1px solid var(--border);
+    }
+    .panel-section h2 {
+      font-size: 0.75rem;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--muted);
+      margin-bottom: 8px;
+    }
+
+    select, button {
+      width: 100%;
+      padding: 7px 10px;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      color: var(--text);
+      font-size: 0.83rem;
+      cursor: pointer;
+      margin-bottom: 6px;
+    }
+    button {
+      background: var(--accent);
+      color: var(--bg);
+      font-weight: 700;
+      border: none;
+      margin-bottom: 0;
+    }
+    button:hover { opacity: 0.88; }
+
+    label { font-size: 0.8rem; color: var(--muted); display: flex;
+            align-items: center; gap: 6px; margin-bottom: 6px; }
+    label input[type=checkbox] { accent-color: var(--accent); }
+
+    /* ── Ranked list ────────────────────────────────────────────────────── */
+    #rank-list {
+      flex: 1;
+      overflow-y: auto;
+      padding: 8px;
+    }
+    .site-card {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 8px 10px;
+      margin-bottom: 6px;
+      cursor: pointer;
+      transition: border-color 0.15s;
+    }
+    .site-card:hover { border-color: var(--accent); }
+    .site-card.selected { border-color: var(--accent); background: #1c2d40; }
+    .site-card .sc-header {
+      display: flex; justify-content: space-between; align-items: center;
+    }
+    .site-card .sc-id    { font-size: 0.8rem; font-weight: 700; }
+    .site-card .sc-score {
+      font-size: 0.8rem; font-weight: 700; padding: 2px 7px;
+      border-radius: 10px;
+    }
+    .score-high { background: #1f3d22; color: var(--good); }
+    .score-med  { background: #3d2e00; color: var(--warn); }
+    .score-low  { background: #3d1a16; color: var(--bad);  }
+    .site-card .sc-sub  { font-size: 0.73rem; color: var(--muted); margin-top: 3px; }
+
+    /* ── Map (centre) ───────────────────────────────────────────────────── */
+    #map {
+      width: 100%;
+      height: 100%;
+      background: #0a0e14;
+    }
+
+    /* ── Right panel ────────────────────────────────────────────────────── */
+    #right-panel {
+      background: var(--surface);
+      border-left: 1px solid var(--border);
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    .chart-box {
+      flex: 1;
+      min-height: 0;
+      padding: 10px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      flex-direction: column;
+    }
+    .chart-box h2 {
+      font-size: 0.72rem;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--muted);
+      margin-bottom: 6px;
+    }
+    .chart-box canvas { flex: 1; min-height: 0; }
+
+    /* ── Summary cards ──────────────────────────────────────────────────── */
+    #summary-cards {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 6px;
+      padding: 10px;
+    }
+    .scard {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 8px 10px;
+    }
+    .scard .sc-val { font-size: 1.2rem; font-weight: 700; color: var(--accent); }
+    .scard .sc-lbl { font-size: 0.7rem; color: var(--muted); margin-top: 2px; }
+
+    /* ── Loading overlay ────────────────────────────────────────────────── */
+    #loading {
+      display: none;
+      position: fixed; inset: 0;
+      background: rgba(0,0,0,0.55);
+      z-index: 9999;
+      align-items: center; justify-content: center;
+      font-size: 1rem; color: var(--accent);
+    }
+    #loading.active { display: flex; }
+
+    /* ── Offline basemap styling ────────────────────────────────────────── */
+    /* No raster tiles are used, so the map pane itself carries the look. */
+    .leaflet-container { background: #0d1117; }
+    .district-label {
+      background: transparent; border: none; box-shadow: none;
+      color: #8b949e; font-size: 0.72rem; font-weight: 600;
+      text-shadow: 0 0 6px #0d1117, 0 0 6px #0d1117;
+    }
+
+    /* ── Scrollbar ──────────────────────────────────────────────────────── */
+    ::-webkit-scrollbar { width: 5px; }
+    ::-webkit-scrollbar-track { background: var(--bg); }
+    ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+  </style>
+</head>
+<body>
+
+<!-- ── Header ─────────────────────────────────────────────────────────────── -->
+<header>
+  <div>
+    <h1>💧 Aquapurity</h1>
+    <p>Explainable Spatiotemporal GNN · Tamil Nadu Groundwater Recharge</p>
+  </div>
+  <span class="badge-synthetic">⚠ SYNTHETIC DATA – Demo Only</span>
+</header>
+
+<!-- ── Left panel ─────────────────────────────────────────────────────────── -->
+<div id="left-panel">
+  <div class="panel-section">
+    <h2>Controls</h2>
+    <select id="sel-district">
+      <option value="Thanjavur">Thanjavur (Alluvial)</option>
+      <option value="Pudukkottai">Pudukkottai (Hard Rock)</option>
+    </select>
+    <select id="sel-structure">
+      <option value="All">All structure types</option>
+      <option value="Percolation Pond">Percolation Pond</option>
+      <option value="Check Dam">Check Dam</option>
+      <option value="Recharge Shaft">Recharge Shaft</option>
+    </select>
+    <label>
+      <input type="checkbox" id="chk-exclude" checked />
+      Screen out constrained sites
+    </label>
+    <button id="btn-rank">🔄 Update Ranking</button>
+  </div>
+
+  <div class="panel-section" style="padding:8px 12px;">
+    <h2>Top Ranked Sites</h2>
+  </div>
+  <div id="rank-list"><p style="color:var(--muted);padding:12px;font-size:0.8rem;">
+    Click "Update Ranking" to load sites.
+  </p></div>
+</div>
+
+<!-- ── Map ────────────────────────────────────────────────────────────────── -->
+<div id="map"></div>
+
+<!-- ── Right panel ────────────────────────────────────────────────────────── -->
+<div id="right-panel">
+  <div class="chart-box" style="flex:1.2">
+    <h2>🔍 Why this site? (TOPSIS contributions)</h2>
+    <canvas id="chart-explain"></canvas>
+  </div>
+  <div class="chart-box" style="flex:1.4">
+    <h2>📈 Forecast – water level (m bgl)</h2>
+    <canvas id="chart-forecast"></canvas>
+  </div>
+  <div id="summary-cards">
+    <div class="scard"><div class="sc-val" id="sc-sites">–</div><div class="sc-lbl">Eligible sites</div></div>
+    <div class="scard"><div class="sc-val" id="sc-wells">–</div><div class="sc-lbl">Wells monitored</div></div>
+    <div class="scard"><div class="sc-val" id="sc-top">–</div><div class="sc-lbl">Top site score</div></div>
+    <div class="scard"><div class="sc-val" id="sc-struct">–</div><div class="sc-lbl">Recommended</div></div>
+  </div>
+</div>
+
+<!-- ── Loading overlay ────────────────────────────────────────────────────── -->
+<div id="loading">⏳ Loading…</div>
+
+<!-- ── Scripts (bundled locally – works fully offline) ───────────────────── -->
+<script src="vendor/leaflet.js"></script>
+<script src="vendor/chart.umd.min.js"></script>
+
+<script>
+/* ─────────────────────────────────────────────────────────────────────────────
+   Configuration
+   ───────────────────────────────────────────────────────────────────────────── */
+const API = 'http://127.0.0.1:8000';
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   Map initialisation
+   ───────────────────────────────────────────────────────────────────────────── */
+const map = L.map('map').setView([10.6, 79.0], 9);
+
+/* ── Offline basemap ────────────────────────────────────────────────────────
+   The prototype must run with no internet at runtime, so instead of remote
+   raster tiles we draw a vector basemap: a 0.25° graticule over the study
+   area plus the bounding outlines of the two districts. ─────────────────── */
+map.attributionControl.setPrefix('Aquapurity · offline vector basemap');
+
+const DISTRICT_BOXES = {
+  Thanjavur:   { bbox: [[10.60, 79.10], [10.95, 79.55]], label: 'Thanjavur · alluvial' },
+  Pudukkottai: { bbox: [[10.20, 78.65], [10.55, 79.10]], label: 'Pudukkottai · hard rock' },
+};
+
+// graticule: grid lines every 0.25 degrees
+for (let lon = 78.50; lon <= 79.75; lon += 0.25) {
+  L.polyline([[10.10, lon], [11.05, lon]],
+             { color: '#30363d', weight: 1 }).addTo(map);
+}
+for (let lat = 10.10; lat <= 11.05; lat += 0.25) {
+  L.polyline([[lat, 78.50], [lat, 79.75]],
+             { color: '#30363d', weight: 1 }).addTo(map);
+}
+
+// district outlines + permanent labels
+Object.values(DISTRICT_BOXES).forEach(d => {
+  L.rectangle(d.bbox, { color: '#58a6ff', weight: 1.2, dashArray: '6 4', fill: false })
+    .bindTooltip(d.label, { permanent: true, direction: 'center',
+                            className: 'district-label' })
+    .addTo(map);
+});
+
+let wellMarkers = L.layerGroup().addTo(map);
+let siteMarkers = L.layerGroup().addTo(map);
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   Chart references
+   ───────────────────────────────────────────────────────────────────────────── */
+let explainChart = null;
+let forecastChart = null;
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   Helpers
+   ───────────────────────────────────────────────────────────────────────────── */
+const $ = id => document.getElementById(id);
+
+function loading(on) {
+  $('loading').classList.toggle('active', on);
+}
+
+function scoreClass(score) {
+  if (score >= 0.60) return 'score-high';
+  if (score >= 0.35) return 'score-med';
+  return 'score-low';
+}
+
+function scoreLabel(score) {
+  if (score >= 0.60) return 'High';
+  if (score >= 0.35) return 'Moderate';
+  return 'Low';
+}
+
+async function apiFetch(url, opts = {}) {
+  const res = await fetch(url, opts);
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }));
+    throw new Error(err.detail || res.statusText);
+  }
+  return res.json();
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   Load wells
+   ───────────────────────────────────────────────────────────────────────────── */
+async function loadWells(district) {
+  const data = await apiFetch(`${API}/wells?district=${district}`);
+  wellMarkers.clearLayers();
+
+  $('sc-wells').textContent = data.count;
+
+  data.data.forEach(w => {
+    const wl = w.water_level_m != null ? w.water_level_m.toFixed(2) : 'N/A';
+    const circle = L.circleMarker([w.lat, w.lon], {
+      radius: 5,
+      color: '#58a6ff',
+      fillColor: '#1c2d40',
+      fillOpacity: 0.85,
+      weight: 1.5,
+    });
+    circle.bindPopup(`
+      <b>${w.well_id}</b><br>
+      Aquifer: ${w.aquifer_type}<br>
+      Latest WL: <b>${wl} m bgl</b><br>
+      <small style="color:#d29922">⚠ Synthetic data</small>
+      <br><button onclick="loadForecast('${w.well_id}',1)"
+        style="margin-top:6px;padding:3px 8px;background:#58a6ff;
+               border:none;border-radius:4px;cursor:pointer;font-size:0.8rem">
+        📈 Forecast
+      </button>
+    `);
+    wellMarkers.addLayer(circle);
+  });
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   Load ranked sites
+   ───────────────────────────────────────────────────────────────────────────── */
+async function loadRanking() {
+  const district = $('sel-district').value;
+  const structure = $('sel-structure').value;
+  const exclude = $('chk-exclude').checked;
+
+  loading(true);
+  try {
+    // rank
+    const body = { district, structure, exclude_constrained: exclude };
+    const ranked = await apiFetch(`${API}/rank`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+
+    // wells
+    await loadWells(district);
+
+    // sites: /sites carries the score of every eligible site (same reference
+    // ranking as /rank) plus constraint flags, so map and list always agree
+    const allSites = await apiFetch(`${API}/sites?district=${district}`);
+
+    siteMarkers.clearLayers();
+
+    allSites.data.forEach(s => {
+      const constrained = s.is_constrained;
+      const score = s.topsis_score;      // null = screened out before scoring
+
+      // constrained (or unscored) sites are drawn hollow grey
+      const colour = (constrained || score == null) ? '#555'
+                     : (score >= 0.60 ? '#3fb950'
+                        : score >= 0.35 ? '#d29922' : '#f85149');
+
+      const marker = L.circleMarker([s.lat, s.lon], {
+        radius: constrained ? 5 : 8,
+        color: colour,
+        fillColor: colour,
+        fillOpacity: constrained ? 0 : 0.7,  // hollow if constrained
+        weight: 1.8,
+        dashArray: constrained ? '3 3' : null,
+      });
+
+      const reason = s.constraint_reason || 'None';
+      const struct = s.recommended_structure || '–';
+      const scoreStr = score != null ? score.toFixed(3) : 'screened out';
+
+      marker.bindPopup(`
+        <b>${s.site_id}</b>${constrained ? ' 🚫 Constrained' : ''}<br>
+        Score: <b>${scoreStr}</b><br>
+        Structure: ${struct}<br>
+        Constraint: ${reason}<br>
+        <small style="color:#d29922">⚠ Synthetic data</small>
+        <br><button onclick="loadExplain('${s.site_id}')"
+          style="margin-top:6px;padding:3px 8px;background:#3fb950;
+                 border:none;border-radius:4px;cursor:pointer;font-size:0.8rem">
+          🔍 Explain
+        </button>
+      `);
+      siteMarkers.addLayer(marker);
+    });
+
+    // ranked list panel
+    renderRankList(ranked.data);
+
+    // summary cards (count only sites that actually carry a score)
+    const scoredList = ranked.data.filter(s => s.topsis_score != null);
+    $('sc-sites').textContent = scoredList.length;
+    if (scoredList.length > 0) {
+      $('sc-top').textContent = scoredList[0].topsis_score.toFixed(3);
+      $('sc-struct').textContent = scoredList[0].recommended_structure;
+    }
+
+  } catch(e) {
+    alert('Error: ' + e.message + '\n\nMake sure the API is running:\n  uvicorn src.api:app --reload');
+  } finally {
+    loading(false);
+  }
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   Render ranked list
+   ───────────────────────────────────────────────────────────────────────────── */
+function renderRankList(sites) {
+  const list = $('rank-list');
+  list.innerHTML = '';
+  // screening precedes scoring: only sites that passed the constraint
+  // screen carry a score, and only those can be ranked
+  sites = sites.filter(s => s.topsis_score != null);
+  if (!sites.length) {
+    list.innerHTML = '<p style="color:var(--muted);padding:12px;font-size:0.8rem;">No eligible sites.</p>';
+    return;
+  }
+  sites.slice(0, 20).forEach(s => {
+    const cls = scoreClass(s.topsis_score);
+    const card = document.createElement('div');
+    card.className = 'site-card';
+    card.id = `card-${s.site_id}`;
+    card.innerHTML = `
+      <div class="sc-header">
+        <span class="sc-id">#${s.rank} ${s.site_id}</span>
+        <span class="sc-score ${cls}">${scoreLabel(s.topsis_score)} ${s.topsis_score.toFixed(3)}</span>
+      </div>
+      <div class="sc-sub">${s.recommended_structure} · slope ${(s.slope_deg||0).toFixed(1)}° · perm ${(s.soil_permeability||0).toFixed(1)}</div>
+    `;
+    card.addEventListener('click', () => {
+      document.querySelectorAll('.site-card').forEach(c => c.classList.remove('selected'));
+      card.classList.add('selected');
+      loadExplain(s.site_id);
+      // pan map to site
+      map.setView([s.lat, s.lon], 12);
+    });
+    list.appendChild(card);
+  });
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   Explain a site (TOPSIS bar chart)
+   ───────────────────────────────────────────────────────────────────────────── */
+async function loadExplain(siteId) {
+  loading(true);
+  try {
+    const data = await apiFetch(`${API}/explain`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ site_id: siteId }),
+    });
+
+    const labels = data.contributions.map(c => c.criterion);
+    const values = data.contributions.map(c => c.weighted_contribution);
+    const colours = values.map(v => v > 0.1 ? '#3fb950' : v > 0.05 ? '#d29922' : '#58a6ff');
+
+    if (explainChart) explainChart.destroy();
+    explainChart = new Chart($('chart-explain'), {
+      type: 'bar',
+      data: {
+        labels,
+        datasets: [{
+          label: `TOPSIS contributions – ${siteId}`,
+          data: values,
+          backgroundColor: colours,
+          borderRadius: 4,
+        }]
+      },
+      options: {
+        indexAxis: 'y',
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: { display: false },
+          tooltip: { callbacks: {
+            label: ctx => ` ${ctx.parsed.x.toFixed(4)} (weighted)`
+          }}
+        },
+        scales: {
+          x: { ticks: { color: '#8b949e' }, grid: { color: '#30363d' } },
+          y: { ticks: { color: '#e6edf3', font: { size: 10 } }, grid: { display: false } },
+        }
+      }
+    });
+  } catch(e) {
+    console.error('Explain error:', e);
+  } finally {
+    loading(false);
+  }
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   Forecast chart
+   ───────────────────────────────────────────────────────────────────────────── */
+async function loadForecast(wellId, horizon) {
+  loading(true);
+  try {
+    const data = await apiFetch(`${API}/forecast`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ well_id: wellId, horizon }),
+    });
+
+    const hist = data.history || [];
+    const labels = hist.map(h => h.date);
+    const histVals = hist.map(h => h.water_level_m);
+
+    // append forecast point
+    const lastDate = labels[labels.length - 1] || '2022-12';
+    labels.push(`+${horizon}m forecast`);
+    histVals.push(null);   // gap
+
+    const forecastLine = Array(hist.length).fill(null);
+    forecastLine.push(data.forecast_m);
+    const lowerLine = Array(hist.length).fill(null);
+    lowerLine.push(data.lower_m);
+    const upperLine = Array(hist.length).fill(null);
+    upperLine.push(data.upper_m);
+
+    if (forecastChart) forecastChart.destroy();
+    forecastChart = new Chart($('chart-forecast'), {
+      type: 'line',
+      data: {
+        labels,
+        datasets: [
+          {
+            label: 'Observed WL (m bgl)',
+            data: histVals,
+            borderColor: '#58a6ff',
+            backgroundColor: 'rgba(88,166,255,0.15)',
+            pointRadius: 2,
+            tension: 0.3,
+            fill: false,
+          },
+          {
+            label: 'Forecast',
+            data: forecastLine,
+            borderColor: '#3fb950',
+            pointRadius: 6,
+            pointBackgroundColor: '#3fb950',
+            showLine: false,
+            fill: false,
+          },
+          {
+            label: 'Upper bound',
+            data: upperLine,
+            borderColor: '#d29922',
+            borderDash: [4,3],
+            pointRadius: 3,
+            fill: false,
+          },
+          {
+            label: 'Lower bound',
+            data: lowerLine,
+            borderColor: '#f85149',
+            borderDash: [4,3],
+            pointRadius: 3,
+            fill: false,
+          },
+        ]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: { labels: { color: '#8b949e', font: { size: 10 } } },
+          tooltip: { mode: 'index', intersect: false },
+        },
+        scales: {
+          x: { ticks: { color: '#8b949e', maxTicksLimit: 10, font: { size: 9 } },
+               grid: { color: '#30363d' } },
+          y: { reverse: true,   // depth: larger = deeper
+               ticks: { color: '#8b949e' }, grid: { color: '#30363d' },
+               title: { display: true, text: 'm below ground', color: '#8b949e', font: { size: 10 } } },
+        }
+      }
+    });
+  } catch(e) {
+    console.error('Forecast error:', e);
+  } finally {
+    loading(false);
+  }
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   Wire controls
+   ───────────────────────────────────────────────────────────────────────────── */
+$('btn-rank').addEventListener('click', loadRanking);
+
+$('sel-district').addEventListener('change', () => {
+  // shift map view
+  const d = $('sel-district').value;
+  map.setView(d === 'Thanjavur' ? [10.78, 79.32] : [10.38, 78.87], 10);
+});
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   Auto-load on start
+   ───────────────────────────────────────────────────────────────────────────── */
+window.addEventListener('load', () => {
+  // Load wells immediately; full ranking on button click
+  loadWells('Thanjavur').catch(() => {});
+  // Expose loadForecast globally so popup buttons can call it
+  window.loadForecast = loadForecast;
+  window.loadExplain  = loadExplain;
+});
+</script>
+</body>
+</html>

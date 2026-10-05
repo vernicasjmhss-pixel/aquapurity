@@ -1,5 +1,7 @@
 # Aquapurity — Explainable Spatiotemporal GNN for Groundwater Recharge Prioritisation
 
+**▶ Live demo (static snapshot):** <https://vernicasjmhss-pixel.github.io/aquapurity/>
+
 [![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/vernicasjmhss-pixel/aquapurity)
 
 > **College project demo – Tamil Nadu Groundwater Recharge Site Prioritisation**
@@ -37,6 +39,7 @@ Sense → Harmonise → Forecast → Rank → Explain → Advise → Learn
 | Explainability | `src/explain.py` | Integrated Gradients (Captum) |
 | API | `src/api.py` | FastAPI REST backend |
 | Dashboard | `app/index.html` | Leaflet GIS frontend |
+| Static export | `src/export_static.py` | Precomputes the dashboard for GitHub Pages |
 
 ---
 
@@ -57,6 +60,10 @@ aquapurity/
 ├── app/
 │   ├── index.html      Leaflet dashboard (open in browser)
 │   └── vendor/         Leaflet 1.9.4 + Chart.js 4.4 bundled locally
+├── docs/               GitHub Pages static build (generated, committed)
+│   ├── index.html      dashboard in static-snapshot mode
+│   ├── data/           precomputed API responses
+│   └── vendor/         Leaflet + Chart.js
 ├── requirements.txt
 ├── Dockerfile             CPU-only image (API + dashboard, one origin)
 ├── render.yaml            Render Blueprint – one-click free deploy
@@ -77,7 +84,40 @@ The prototype is ready to run as a container. `Dockerfile` installs the
 fits a free 512 MB instance), and `src/api.py` serves the dashboard and the
 API from the same origin — one public URL, nothing to configure.
 
-### Render (recommended)
+### Live demo — GitHub Pages (static snapshot, no account needed)
+
+**<https://vernicasjmhss-pixel.github.io/aquapurity/>**
+
+GitHub Pages can host HTML/JS but not Python, so `docs/` holds a **static
+snapshot**: `src/export_static.py` asks a running API for every request the
+dashboard can ever make and writes the answers to `docs/data/*.json`. The
+dashboard then reads those files instead of calling the API (the static-mode
+branch of `apiFetch` in `app/index.html`).
+
+The interface space is small and deterministic (seed 42, CPU-only, no user
+input beyond the controls), which is what makes this possible:
+
+| Endpoint | Requests |
+|---|---|
+| `/wells`, `/sites` | 2 districts each |
+| `/rank` | 2 districts × 4 structures × 2 constrain modes = 16 |
+| `/forecast` | 120 wells × 3 horizons = 360 |
+| `/explain` | 120 wells × 3 horizons + 80 sites = 440 |
+
+The responses are the API's **real output**, not a re-implementation, so the
+numbers are identical. Headless reviewing works too: no cold starts, nothing
+to keep awake. Rebuild it after any pipeline change:
+
+```bash
+uvicorn src.api:app --port 8000 &
+python src/export_static.py --api http://127.0.0.1:8000
+python -m http.server 8095 -d docs      # preview locally
+```
+
+Pages publishes the `docs/` folder from `main`; commit the regenerated
+`docs/` to update the live site.
+
+### Render (recommended for the live API)
 
 The quickest route is the button at the top of this README (or this link):
 

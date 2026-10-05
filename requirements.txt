@@ -1,8 +1,20 @@
-fastapi>=0.110.0
-uvicorn[standard]>=0.29.0
-pydantic>=2.6.0
-torch>=2.2.0
-numpy>=1.26.0
-pandas>=2.2.0
-scikit-learn>=1.4.0
-captum>=0.7.0
+# Aquapurity - Python dependencies
+#
+# Versions are pinned to the set the prototype was developed and verified
+# against, so the deployed container behaves exactly like the local run.
+#
+# CPU-only PyTorch: the container gets 512 MB of RAM on a free tier, so we
+# install the CPU wheel (no CUDA runtime, ~10x smaller). The extra index is
+# listed first so `torch==...+cpu` resolves on any platform; a normal local
+# `pip install -r requirements.txt` works unchanged.
+
+--extra-index-url https://download.pytorch.org/whl/cpu
+
+fastapi==0.135.1
+uvicorn[standard]==0.42.0
+pydantic==2.12.5
+numpy==2.2.3
+pandas==2.2.3
+scikit-learn==1.9.1
+torch==2.10.0+cpu
+captum==0.9.0

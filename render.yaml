@@ -1,0 +1,23 @@
+# Aquapurity - Render Blueprint (free tier)
+# ---------------------------------------------------------------------------
+# One-click deploy: Render dashboard -> New + -> Blueprint -> pick this repo.
+# Free plan, no credit card. The service builds ./Dockerfile, serves the API
+# and the dashboard on one URL, and is health-checked at /health.
+#
+# Note: Render spins a free service down after 15 minutes without traffic, so
+# the first request afterwards takes ~30-60s (torch import + model load).
+
+services:
+  - type: web
+    name: aquapurity
+    runtime: docker
+    plan: free
+    region: singapore
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: PYTHONUNBUFFERED
+        value: "1"
+      - key: OMP_NUM_THREADS
+        value: "1"

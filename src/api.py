@@ -13,7 +13,11 @@ Five endpoints:
 Model is loaded ONCE at startup per district to avoid repeated disk reads.
 All data is SYNTHETIC - labelled in every response.
 
-Run with:  uvicorn src.api:app --reload
+The dashboard in app/ is mounted on the same origin as the API, so one URL
+serves both the UI and the JSON endpoints (no hard-coded host, no CORS).
+
+Run locally with:  uvicorn src.api:app --reload
+       (or)        python src/api.py
 """
 
 import contextlib
@@ -28,6 +32,7 @@ import pandas as pd
 import torch
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, field_validator
 
 # Force UTF-8 stdout before anything prints: uvicorn log lines and helper
@@ -576,3 +581,42 @@ def post_explain(req: ExplainRequest):
             status_code=422,
             detail="Provide either site_id or well_id in the request body.",
         )
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# /health - cheap liveness probe for the hosting platform (Render / Koyeb /
+# Cloud Run). Deliberately touches no data so it stays fast even while the
+# models are still loading.
+# ──────────────────────────────────────────────────────────────────────────────
+@app.get("/health")
+def health():
+    return {"status": "ok", "synthetic": True, "districts": DISTRICTS}
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Static dashboard, served from the SAME origin as the API
+# ──────────────────────────────────────────────────────────────────────────────
+# Mounted last, so every API route defined above wins; everything else
+# (/, /index.html, /vendor/*) is served out of app/. Sharing one origin in the
+# cloud means index.html needs no hard-coded API URL and there is no CORS
+# pre-flight. It also lets the whole prototype run from a single local port:
+#     uvicorn src.api:app   ->   http://127.0.0.1:8000
+WEB_DIR = os.path.normpath(os.path.join(SRC_DIR, "..", "app"))
+if os.path.isdir(WEB_DIR):
+    app.mount("/", StaticFiles(directory=WEB_DIR, html=True), name="dashboard")
+else:
+    print(f"[API] WARNING - dashboard folder not found at {WEB_DIR}; "
+          f"serving the API only.")
+
+
+if __name__ == "__main__":
+    # Convenience entry point used by the cloud start command:
+    #   python src/api.py
+    import uvicorn
+
+    uvicorn.run(
+        "api:app",
+        host="0.0.0.0",
+        port=int(os.environ.get("PORT", 8000)),
+        log_level="info",
+    )

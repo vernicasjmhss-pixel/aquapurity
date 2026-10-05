@@ -13,7 +13,9 @@
   The basemap is drawn offline as vector graticule + district outlines,
   so the dashboard works with the network cable unplugged.
 
-  The page talks to the FastAPI backend at http://127.0.0.1:8000
+  The FastAPI backend serves this page from the same origin (cloud), so there
+  is no hard-coded host to configure. Running the page from a separate static
+  dev server on :8090 still works - it falls back to http://127.0.0.1:8000.
 -->
 <html lang="en">
 <head>
@@ -300,7 +302,17 @@
 /* ─────────────────────────────────────────────────────────────────────────────
    Configuration
    ───────────────────────────────────────────────────────────────────────────── */
-const API = 'http://127.0.0.1:8000';
+/* API base URL.
+   In the cloud the dashboard and the API are one origin, so the base is ''.
+   For local development the page may be opened from a static server on :8090
+   while the API runs on :8000 - in that one case we point at :8000.
+   Override anything by setting window.AQUAPURITY_API before this script. */
+const API = (() => {
+  if (typeof window.AQUAPURITY_API === 'string') return window.AQUAPURITY_API;
+  const onLocalDevPort = ['127.0.0.1', 'localhost'].includes(location.hostname)
+                         && location.port && location.port !== '8000';
+  return onLocalDevPort ? 'http://127.0.0.1:8000' : '';
+})();
 
 /* ─────────────────────────────────────────────────────────────────────────────
    Map initialisation

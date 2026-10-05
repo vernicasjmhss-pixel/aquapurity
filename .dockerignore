@@ -1,0 +1,17 @@
+# Keep the build context small and the image free of local/dev artefacts.
+# data/ is intentionally NOT ignored - the trained checkpoints and CSVs ship
+# with the image because the cloud instance has an ephemeral filesystem.
+
+.git
+.gitignore
+.github
+.freebuff
+__pycache__
+**/__pycache__
+*.py[cod]
+.venv
+venv
+.env
+*.md
+!README.md
+.DS_Store

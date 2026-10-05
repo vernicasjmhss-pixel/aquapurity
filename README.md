@@ -56,12 +56,47 @@ aquapurity/
 │   ├── index.html      Leaflet dashboard (open in browser)
 │   └── vendor/         Leaflet 1.9.4 + Chart.js 4.4 bundled locally
 ├── requirements.txt
+├── Dockerfile             CPU-only image (API + dashboard, one origin)
+├── render.yaml            Render Blueprint – one-click free deploy
+├── .dockerignore
 └── README.md
 ```
 
 Frontend note: **no CDN, no internet at runtime.** Leaflet and Chart.js are
 bundled in `app/vendor/`, and the basemap is drawn offline as a vector
 graticule with district outlines (no remote map tiles).
+
+---
+
+## Deploy to the cloud (free, no credit card)
+
+The prototype is ready to run as a container. `Dockerfile` installs the
+**CPU-only** PyTorch wheel (the runtime needs roughly 300 MB of RAM, so it
+fits a free 512 MB instance), and `src/api.py` serves the dashboard and the
+API from the same origin — one public URL, nothing to configure.
+
+### Render (recommended)
+
+1. Create a free account at <https://render.com> (no card required).
+2. **New + → Blueprint**, pick the `aquapurity` repository.
+3. Render reads `render.yaml`, builds `./Dockerfile`, and deploys on the
+   **Free** plan. You get a URL like `https://aquapurity.onrender.com`.
+
+<details>
+<summary>Any other Docker host (Koyeb, Cloud Run, Fly, a VM …)</summary>
+
+```bash
+docker build -t aquapurity .
+docker run -p 8000:8000 aquapurity     # -> http://localhost:8000
+```
+
+The container listens on `$PORT` (default `8000`) on `0.0.0.0`, exposes
+`/health` for platform health checks, and needs no volumes or secrets.
+</details>
+
+**Free-tier behaviour to expect:** a free web service is put to sleep after
+~15 minutes without traffic, so the first request after a quiet period takes
+roughly 30–60 s (loading torch + the models). Every request after that is fast.
 
 ---
 
@@ -100,14 +135,23 @@ saves `data/model_thanjavur.pt` and `data/model_pudukkottai.pt`.
 ```bash
 uvicorn src.api:app --reload
 ```
-API available at **http://127.0.0.1:8000**
-Interactive docs at **http://127.0.0.1:8000/docs**
+The API **and** the dashboard are served from this one process:
+
+| URL | What |
+|---|---|
+| http://127.0.0.1:8000 | Dashboard (the `app/` folder) |
+| http://127.0.0.1:8000/docs | Interactive API docs |
+| http://127.0.0.1:8000/health | Liveness probe |
 
 ### Step 4 – Open the dashboard
-Open `app/index.html` in a browser (double-click or `file://` URL).
-It talks to the API at `http://127.0.0.1:8000`, so keep Step 3 running.
+Just open **http://127.0.0.1:8000** — no second server needed. The page and
+the JSON API share an origin, so there is no host to configure.
 A visible **“Synthetic data”** badge and per-popup warnings remind you that
 all values are generated, not measured.
+
+> Opening `app/index.html` directly from disk (or from a separate static
+> server on port 8090) still works: the page then falls back to
+> `http://127.0.0.1:8000` for the API.
 
 ---
 
@@ -120,6 +164,8 @@ all values are generated, not measured.
 | POST | `/forecast` | STGNN forecast + uncertainty range |
 | POST | `/rank` | AHP+TOPSIS ranked sites |
 | POST | `/explain` | Integrated Gradients / TOPSIS attribution |
+| GET | `/health` | Liveness probe (used by the host) |
+| GET | `/` | Dashboard (`app/index.html`) |
 
 ---
 

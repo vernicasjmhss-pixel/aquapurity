@@ -1,5 +1,7 @@
 # Aquapurity — Explainable Spatiotemporal GNN for Groundwater Recharge Prioritisation
 
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/vernicasjmhss-pixel/aquapurity)
+
 > **College project demo – Tamil Nadu Groundwater Recharge Site Prioritisation**
 
 > ⚠️ **ALL DATA IS FULLY SYNTHETIC.**
@@ -77,10 +79,19 @@ API from the same origin — one public URL, nothing to configure.
 
 ### Render (recommended)
 
+The quickest route is the button at the top of this README (or this link):
+
+**<https://render.com/deploy?repo=https://github.com/vernicasjmhss-pixel/aquapurity>**
+
 1. Create a free account at <https://render.com> (no card required).
-2. **New + → Blueprint**, pick the `aquapurity` repository.
-3. Render reads `render.yaml`, builds `./Dockerfile`, and deploys on the
-   **Free** plan. You get a URL like `https://aquapurity.onrender.com`.
+2. Open the link — Render reads `render.yaml`, asks you to confirm, and
+   applies the Blueprint.
+3. It builds `./Dockerfile` and deploys on the **Free** plan. You get a URL
+   like `https://aquapurity.onrender.com`.
+
+The 3-step alternative is **New + → Blueprint → pick the `aquapurity`
+repository → Apply**. First build takes a few minutes because the PyTorch
+layer is ~500 MB.
 
 <details>
 <summary>Any other Docker host (Koyeb, Cloud Run, Fly, a VM …)</summary>
